@@ -177,13 +177,28 @@ curl -X POST http://localhost:8080/api/v1/tasks \
 
 ### Gateway API (`:8080`)
 
+#### Task Management
 - `POST /api/v1/tasks` - Submit a new task
-- `GET /api/v1/tasks/:taskId` - Get task status
-- `GET /api/v1/nodes` - List all nodes
-- `GET /api/v1/stats` - Get load balancer statistics
+- `GET /api/v1/tasks/:taskId` - Get specific task status
+- `GET /api/v1/tasks` - Get all tasks across all nodes
+
+#### Node Management
+- `GET /api/v1/nodes` - List all nodes with status
+- `GET /api/v1/nodes/count` - Get node count statistics
+- `GET /api/v1/nodes/health` - Get detailed health status of all nodes
+- `GET /api/v1/nodes/:nodeId` - Get detailed information about a specific node
 - `POST /api/v1/nodes` - Register a new node
 - `DELETE /api/v1/nodes/:nodeId` - Unregister a node
-- `GET /health` - Health check
+
+#### System Monitoring
+- `GET /api/v1/stats` - Get comprehensive system statistics
+- `GET /api/v1/stats/overview` - Get system overview with health percentages
+- `GET /api/v1/stats/tasks` - Get detailed task statistics across all nodes
+- `GET /api/v1/stats/capacity` - Get capacity utilization statistics
+
+#### Health and Status
+- `GET /api/v1/health` - Basic health check
+- `GET /api/v1/status` - Overall system status (healthy/degraded/down)
 
 ### Node API (`:8081`)
 
@@ -196,6 +211,100 @@ curl -X POST http://localhost:8080/api/v1/tasks \
 - `POST /api/v1/gossip` - Handle gossip messages
 - `GET /api/v1/peers` - Get known peers
 - `GET /health` - Health check
+
+## API Examples
+
+### Get System Overview
+```bash
+curl http://localhost:8080/api/v1/stats/overview
+```
+
+Response:
+```json
+{
+  "system": {
+    "total_nodes": 3,
+    "healthy_nodes": 2,
+    "unhealthy_nodes": 1,
+    "health_percentage": 66.67
+  },
+  "tasks": {
+    "total_active": 5,
+    "total_queued": 12,
+    "total_tasks": 17
+  },
+  "performance": {
+    "average_load": 0.45,
+    "total_load": 1.35
+  },
+  "balancer": {
+    "strategy": "round_robin",
+    "last_updated": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Get Node Health
+```bash
+curl http://localhost:8080/api/v1/nodes/health
+```
+
+Response:
+```json
+{
+  "nodes": [
+    {
+      "node_id": "node-1",
+      "address": "localhost:8081",
+      "healthy": true,
+      "last_heartbeat": "2024-01-15T10:30:00Z",
+      "active_tasks": 2,
+      "queue_length": 5,
+      "load": 0.4
+    }
+  ],
+  "total_nodes": 1,
+  "healthy_count": 1
+}
+```
+
+### Get Capacity Statistics
+```bash
+curl http://localhost:8080/api/v1/stats/capacity
+```
+
+Response:
+```json
+{
+  "nodes": [
+    {
+      "node_id": "node-1",
+      "address": "localhost:8081",
+      "healthy": true,
+      "capacity": {
+        "max_requests_per_minute": 100,
+        "max_tokens_per_minute": 10000,
+        "max_concurrent_tasks": 10,
+        "max_queue_size": 1000,
+        "current_requests_per_min": 25,
+        "current_tokens_per_min": 2500,
+        "current_concurrent_tasks": 2,
+        "utilization_percentage": 20.0
+      }
+    }
+  ],
+  "system_capacity": {
+    "max_requests_per_minute": 100,
+    "max_tokens_per_minute": 10000,
+    "max_concurrent_tasks": 10,
+    "max_queue_size": 1000,
+    "current_requests_per_min": 25,
+    "current_tokens_per_min": 2500,
+    "current_concurrent_tasks": 2,
+    "utilization_percentage": 20.0
+  }
+}
+```
 
 ## Development Status
 

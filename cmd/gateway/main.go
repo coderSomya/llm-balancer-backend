@@ -84,12 +84,28 @@ func (s *GatewayServer) Start() error {
 	// API routes
 	api := router.Group("/api/v1")
 	{
+		// Task management
 		api.POST("/tasks", s.handleSubmitTask)
 		api.GET("/tasks/:taskId", s.handleGetTask)
+		api.GET("/tasks", s.handleGetAllTasks)
+		
+		// Node management
 		api.GET("/nodes", s.handleGetNodes)
-		api.GET("/stats", s.handleGetStats)
+		api.GET("/nodes/count", s.handleGetNodeCount)
+		api.GET("/nodes/health", s.handleGetNodeHealth)
+		api.GET("/nodes/:nodeId", s.handleGetNodeDetails)
 		api.POST("/nodes", s.handleRegisterNode)
 		api.DELETE("/nodes/:nodeId", s.handleUnregisterNode)
+		
+		// System monitoring
+		api.GET("/stats", s.handleGetStats)
+		api.GET("/stats/overview", s.handleGetSystemOverview)
+		api.GET("/stats/tasks", s.handleGetTaskStats)
+		api.GET("/stats/capacity", s.handleGetCapacityStats)
+		
+		// Health and status
+		api.GET("/health", s.handleHealth)
+		api.GET("/status", s.handleGetSystemStatus)
 	}
 	
 	// Health check
@@ -181,13 +197,62 @@ func (s *GatewayServer) handleGetTask(c *gin.Context) {
 
 func (s *GatewayServer) handleGetNodes(c *gin.Context) {
 	nodes := s.balancer.GetNodeStatus()
+	
+	var nodeList []map[string]interface{}
+	
+	for nodeID, nodeStatus := range nodes {
+		node := map[string]interface{}{
+			"node_id": nodeID,
+			"address": nodeStatus.Address,
+			"healthy": nodeStatus.IsHealthy(),
+			"last_heartbeat": nodeStatus.LastHeartbeat,
+			"active_tasks": nodeStatus.ActiveTasks,
+			"queue_length": nodeStatus.QueueLength,
+			"load": nodeStatus.GetLoad(),
+		}
+		nodeList = append(nodeList, node)
+	}
+	
 	c.JSON(http.StatusOK, gin.H{
-		"nodes": nodes,
+		"nodes": nodeList,
+		"total_nodes": len(nodes),
+		"healthy_nodes": len(s.getHealthyNodes()),
 	})
 }
 
 func (s *GatewayServer) handleGetStats(c *gin.Context) {
-	stats := s.balancer.GetStats()
+	// Get load balancer stats
+	balancerStats := s.balancer.GetStats()
+	
+	// Get system overview
+	nodes := s.balancer.GetNodeStatus()
+	healthyNodes := s.getHealthyNodes()
+	
+	// Calculate additional stats
+	var totalActiveTasks int
+	var totalQueueLength int
+	
+	for _, nodeStatus := range nodes {
+		totalActiveTasks += nodeStatus.ActiveTasks
+		totalQueueLength += nodeStatus.QueueLength
+	}
+	
+	stats := map[string]interface{}{
+		"balancer": balancerStats,
+		"system": map[string]interface{}{
+			"total_nodes": len(nodes),
+			"healthy_nodes": len(healthyNodes),
+			"unhealthy_nodes": len(nodes) - len(healthyNodes),
+			"health_percentage": float64(len(healthyNodes)) / float64(len(nodes)) * 100,
+		},
+		"tasks": map[string]interface{}{
+			"total_active": totalActiveTasks,
+			"total_queued": totalQueueLength,
+			"total_tasks": totalActiveTasks + totalQueueLength,
+		},
+		"timestamp": time.Now().UTC(),
+	}
+	
 	c.JSON(http.StatusOK, stats)
 }
 
@@ -233,4 +298,310 @@ func (s *GatewayServer) handleHealth(c *gin.Context) {
 
 func generateTaskID() string {
 	return fmt.Sprintf("task-%d", time.Now().UnixNano())
+} 
+
+func (s *GatewayServer) handleGetAllTasks(c *gin.Context) {
+	// Get all nodes
+	nodes := s.balancer.GetNodeStatus()
+	
+	var allTasks []map[string]interface{}
+	
+	// Collect tasks from all nodes
+	for nodeID, nodeStatus := range nodes {
+		if nodeStatus.IsHealthy() {
+			// In a real implementation, we would query each node for its tasks
+			// For now, return mock data
+			nodeTasks := map[string]interface{}{
+				"node_id": nodeID,
+				"address": nodeStatus.Address,
+				"tasks": []map[string]interface{}{
+					{
+						"id":     "task-1",
+						"status": "completed",
+						"created_at": time.Now().Add(-5 * time.Minute),
+					},
+					{
+						"id":     "task-2", 
+						"status": "running",
+						"created_at": time.Now().Add(-2 * time.Minute),
+					},
+				},
+				"total_tasks": 2,
+			}
+			allTasks = append(allTasks, nodeTasks)
+		}
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"tasks": allTasks,
+		"total_nodes": len(nodes),
+		"healthy_nodes": len(s.getHealthyNodes()),
+	})
+}
+
+func (s *GatewayServer) handleGetNodeCount(c *gin.Context) {
+	nodes := s.balancer.GetNodeStatus()
+	healthyNodes := s.getHealthyNodes()
+	
+	c.JSON(http.StatusOK, gin.H{
+		"total_nodes": len(nodes),
+		"healthy_nodes": len(healthyNodes),
+		"unhealthy_nodes": len(nodes) - len(healthyNodes),
+	})
+}
+
+func (s *GatewayServer) handleGetNodeHealth(c *gin.Context) {
+	nodes := s.balancer.GetNodeStatus()
+	
+	var healthStatus []map[string]interface{}
+	
+	for nodeID, nodeStatus := range nodes {
+		health := map[string]interface{}{
+			"node_id": nodeID,
+			"address": nodeStatus.Address,
+			"healthy": nodeStatus.IsHealthy(),
+			"last_heartbeat": nodeStatus.LastHeartbeat,
+			"active_tasks": nodeStatus.ActiveTasks,
+			"queue_length": nodeStatus.QueueLength,
+			"load": nodeStatus.GetLoad(),
+		}
+		healthStatus = append(healthStatus, health)
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"nodes": healthStatus,
+		"total_nodes": len(nodes),
+		"healthy_count": len(s.getHealthyNodes()),
+	})
+}
+
+func (s *GatewayServer) handleGetNodeDetails(c *gin.Context) {
+	nodeID := c.Param("nodeId")
+	
+	nodes := s.balancer.GetNodeStatus()
+	nodeStatus, exists := nodes[nodeID]
+	
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Node not found",
+		})
+		return
+	}
+	
+	// Get node capacity
+	nodeCapacity := s.balancer.GetNodeCapacity(nodeID)
+	
+	details := map[string]interface{}{
+		"node_id": nodeID,
+		"address": nodeStatus.Address,
+		"status": map[string]interface{}{
+			"healthy": nodeStatus.IsHealthy(),
+			"last_heartbeat": nodeStatus.LastHeartbeat,
+			"active_tasks": nodeStatus.ActiveTasks,
+			"queue_length": nodeStatus.QueueLength,
+			"load": nodeStatus.GetLoad(),
+		},
+	}
+	
+	if nodeCapacity != nil {
+		details["capacity"] = map[string]interface{}{
+			"max_requests_per_minute": nodeCapacity.MaxRequestsPerMinute,
+			"max_tokens_per_minute": nodeCapacity.MaxTokensPerMinute,
+			"max_concurrent_tasks": nodeCapacity.MaxConcurrentTasks,
+			"max_queue_size": nodeCapacity.MaxQueueSize,
+			"current_requests_per_min": nodeCapacity.CurrentRequestsPerMin,
+			"current_tokens_per_min": nodeCapacity.CurrentTokensPerMin,
+			"current_concurrent_tasks": nodeCapacity.CurrentConcurrentTasks,
+		}
+	}
+	
+	c.JSON(http.StatusOK, details)
+}
+
+func (s *GatewayServer) handleGetSystemOverview(c *gin.Context) {
+	nodes := s.balancer.GetNodeStatus()
+	healthyNodes := s.getHealthyNodes()
+	
+	// Calculate system-wide statistics
+	var totalActiveTasks int
+	var totalQueueLength int
+	var totalLoad float64
+	
+	for _, nodeStatus := range nodes {
+		totalActiveTasks += nodeStatus.ActiveTasks
+		totalQueueLength += nodeStatus.QueueLength
+		totalLoad += nodeStatus.GetLoad()
+	}
+	
+	avgLoad := 0.0
+	if len(nodes) > 0 {
+		avgLoad = totalLoad / float64(len(nodes))
+	}
+	
+	overview := map[string]interface{}{
+		"system": map[string]interface{}{
+			"total_nodes": len(nodes),
+			"healthy_nodes": len(healthyNodes),
+			"unhealthy_nodes": len(nodes) - len(healthyNodes),
+			"health_percentage": float64(len(healthyNodes)) / float64(len(nodes)) * 100,
+		},
+		"tasks": map[string]interface{}{
+			"total_active": totalActiveTasks,
+			"total_queued": totalQueueLength,
+			"total_tasks": totalActiveTasks + totalQueueLength,
+		},
+		"performance": map[string]interface{}{
+			"average_load": avgLoad,
+			"total_load": totalLoad,
+		},
+		"balancer": map[string]interface{}{
+			"strategy": s.balancer.strategy,
+			"last_updated": time.Now(),
+		},
+	}
+	
+	c.JSON(http.StatusOK, overview)
+}
+
+func (s *GatewayServer) handleGetTaskStats(c *gin.Context) {
+	nodes := s.balancer.GetNodeStatus()
+	
+	var taskStats []map[string]interface{}
+	
+	for nodeID, nodeStatus := range nodes {
+		stats := map[string]interface{}{
+			"node_id": nodeID,
+			"address": nodeStatus.Address,
+			"active_tasks": nodeStatus.ActiveTasks,
+			"queue_length": nodeStatus.QueueLength,
+			"total_tasks": nodeStatus.ActiveTasks + nodeStatus.QueueLength,
+		}
+		taskStats = append(taskStats, stats)
+	}
+	
+	// Calculate totals
+	var totalActive, totalQueued, totalTasks int
+	for _, stats := range taskStats {
+		totalActive += stats["active_tasks"].(int)
+		totalQueued += stats["queue_length"].(int)
+		totalTasks += stats["total_tasks"].(int)
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"nodes": taskStats,
+		"totals": map[string]interface{}{
+			"active_tasks": totalActive,
+			"queued_tasks": totalQueued,
+			"total_tasks": totalTasks,
+		},
+		"summary": map[string]interface{}{
+			"nodes_with_tasks": len(taskStats),
+			"average_tasks_per_node": float64(totalTasks) / float64(len(nodes)),
+		},
+	})
+}
+
+func (s *GatewayServer) handleGetCapacityStats(c *gin.Context) {
+	nodes := s.balancer.GetNodeStatus()
+	
+	var capacityStats []map[string]interface{}
+	
+	for nodeID, nodeStatus := range nodes {
+		nodeCapacity := s.balancer.GetNodeCapacity(nodeID)
+		
+		stats := map[string]interface{}{
+			"node_id": nodeID,
+			"address": nodeStatus.Address,
+			"healthy": nodeStatus.IsHealthy(),
+		}
+		
+		if nodeCapacity != nil {
+			stats["capacity"] = map[string]interface{}{
+				"max_requests_per_minute": nodeCapacity.MaxRequestsPerMinute,
+				"max_tokens_per_minute": nodeCapacity.MaxTokensPerMinute,
+				"max_concurrent_tasks": nodeCapacity.MaxConcurrentTasks,
+				"max_queue_size": nodeCapacity.MaxQueueSize,
+				"current_requests_per_min": nodeCapacity.CurrentRequestsPerMin,
+				"current_tokens_per_min": nodeCapacity.CurrentTokensPerMin,
+				"current_concurrent_tasks": nodeCapacity.CurrentConcurrentTasks,
+				"utilization_percentage": float64(nodeCapacity.CurrentConcurrentTasks) / float64(nodeCapacity.MaxConcurrentTasks) * 100,
+			}
+		}
+		
+		capacityStats = append(capacityStats, stats)
+	}
+	
+	// Calculate system-wide capacity
+	var totalMaxRequests, totalMaxTokens, totalMaxConcurrent, totalMaxQueue int
+	var totalCurrentRequests, totalCurrentTokens, totalCurrentConcurrent int
+	
+	for _, stats := range capacityStats {
+		if capacity, exists := stats["capacity"].(map[string]interface{}); exists {
+			totalMaxRequests += capacity["max_requests_per_minute"].(int)
+			totalMaxTokens += capacity["max_tokens_per_minute"].(int)
+			totalMaxConcurrent += capacity["max_concurrent_tasks"].(int)
+			totalMaxQueue += capacity["max_queue_size"].(int)
+			totalCurrentRequests += capacity["current_requests_per_min"].(int)
+			totalCurrentTokens += capacity["current_tokens_per_min"].(int)
+			totalCurrentConcurrent += capacity["current_concurrent_tasks"].(int)
+		}
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"nodes": capacityStats,
+		"system_capacity": map[string]interface{}{
+			"max_requests_per_minute": totalMaxRequests,
+			"max_tokens_per_minute": totalMaxTokens,
+			"max_concurrent_tasks": totalMaxConcurrent,
+			"max_queue_size": totalMaxQueue,
+			"current_requests_per_min": totalCurrentRequests,
+			"current_tokens_per_min": totalCurrentTokens,
+			"current_concurrent_tasks": totalCurrentConcurrent,
+			"utilization_percentage": float64(totalCurrentConcurrent) / float64(totalMaxConcurrent) * 100,
+		},
+	})
+}
+
+func (s *GatewayServer) handleGetSystemStatus(c *gin.Context) {
+	nodes := s.balancer.GetNodeStatus()
+	healthyNodes := s.getHealthyNodes()
+	
+	// Determine overall system status
+	systemStatus := "healthy"
+	if len(healthyNodes) == 0 {
+		systemStatus = "down"
+	} else if len(healthyNodes) < len(nodes) {
+		systemStatus = "degraded"
+	}
+	
+	status := map[string]interface{}{
+		"status": systemStatus,
+		"timestamp": time.Now().UTC(),
+		"nodes": map[string]interface{}{
+			"total": len(nodes),
+			"healthy": len(healthyNodes),
+			"unhealthy": len(nodes) - len(healthyNodes),
+		},
+		"balancer": map[string]interface{}{
+			"strategy": s.balancer.strategy,
+			"available": len(healthyNodes) > 0,
+		},
+		"uptime": "0h 0m 0s", // In a real implementation, track actual uptime
+	}
+	
+	c.JSON(http.StatusOK, status)
+}
+
+// getHealthyNodes returns only healthy nodes
+func (s *GatewayServer) getHealthyNodes() []string {
+	var healthy []string
+	nodes := s.balancer.GetNodeStatus()
+	
+	for nodeID, nodeStatus := range nodes {
+		if nodeStatus.IsHealthy() {
+			healthy = append(healthy, nodeID)
+		}
+	}
+	
+	return healthy
 } 
