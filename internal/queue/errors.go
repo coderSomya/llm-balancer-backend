@@ -17,4 +17,7 @@ var (
 	
 	// ErrTaskNotFound is returned when a task is not found in the queue
 	ErrTaskNotFound = errors.New("task not found")
+	
+	// ErrInvalidTask is returned when an invalid task is provided
+	ErrInvalidTask = errors.New("invalid task")
 ) 

@@ -1,339 +1,439 @@
-# LLM Balancer
+# LLM Load Balancer
 
-A robust distributed load balancer system for LLM instances built in Go. This system provides intelligent task routing, capacity management, and fault tolerance for distributed LLM processing.
+A production-ready, distributed load balancer for LLM (Large Language Model) inference with advanced features for high availability, fault tolerance, and intelligent task routing.
 
 ## Features
 
-- **Intelligent Load Balancing**: Routes tasks based on node capacity and task complexity
-- **Concurrency-Safe Task Queues**: Priority-based task queues with thread-safe operations
-- **Capacity Management**: Tracks requests/minute and tokens/minute constraints
-- **Health Monitoring**: Real-time node health checking and status monitoring
-- **Fault Tolerance**: Circuit breaker patterns and retry mechanisms
-- **Gossip Protocol**: Node-to-node communication for failure detection and task redistribution
-- **Task Recovery**: Automatic redistribution of tasks from failed nodes
-- **Metrics & Observability**: Prometheus metrics and comprehensive monitoring
-- **Distributed Architecture**: Support for multiple LLM nodes across machines
+### 🚀 Production-Ready Architecture
+
+- **Distributed Architecture**: Multi-node deployment with automatic node discovery
+- **Fault Tolerance**: Circuit breaker patterns, automatic failover, and task redistribution
+- **High Availability**: Health checks, automatic recovery, and graceful degradation
+- **Scalability**: Horizontal scaling with intelligent load distribution
+
+### 🎯 Advanced Load Balancing
+
+- **Multiple Strategies**: Round-robin, least-loaded, weighted, random, adaptive, and geographic routing
+- **Circuit Breakers**: Automatic node isolation on repeated failures
+- **Adaptive Routing**: Dynamic strategy selection based on system conditions
+- **Priority Queue**: Task prioritization with intelligent scheduling
+- **Capacity Management**: Token-based and concurrent task limits
+
+### 📊 Comprehensive Monitoring
+
+- **Real-time Metrics**: Processing times, error rates, queue utilization
+- **Health Monitoring**: Node health, queue health, and system status
+- **Performance Analytics**: Latency tracking, throughput monitoring
+- **Error Tracking**: Detailed error categorization and reporting
+
+### 🔄 Gossip Protocol
+
+- **Node Discovery**: Automatic peer discovery and management
+- **Failure Detection**: Advanced failure detection with suspicion and death states
+- **Task Redistribution**: Automatic task recovery from failed nodes
+- **Latency Monitoring**: Peer latency tracking and optimization
+- **Load Sharing**: Intelligent load distribution across healthy nodes
+
+### 🛡️ Robust Error Handling
+
+- **Retry Mechanisms**: Automatic retry with exponential backoff
+- **Timeout Management**: Configurable timeouts for all operations
+- **Error Recovery**: Graceful handling of network failures and node outages
+- **Validation**: Comprehensive input validation and sanitization
+
+### 📈 Advanced Queue Management
+
+- **Priority Queue**: Heap-based priority queue with FIFO for same priority
+- **Queue Analytics**: Size distribution, wait times, and utilization metrics
+- **Task Tracking**: Complete task lifecycle management
+- **Orphaned Task Detection**: Automatic detection and recovery of stuck tasks
 
 ## Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   API Gateway   │    │   Node 1        │    │   Node 2        │
-│   (Load Balancer)│    │   - Task Queue  │    │   - Task Queue  │
-│   - Route Tasks  │    │   - Workers     │    │   - Workers     │
-│   - Health Check │    │   - Capacity    │    │   - Capacity    │
-│   - Gossip       │    │   - Gossip      │    │   - Gossip      │
+│   Gateway       │    │   Node 1        │    │   Node 2        │
+│                 │    │                 │    │                 │
+│ • Load Balancer │◄──►│ • Task Queue    │    │ • Task Queue    │
+│ • Task Registry │    │ • LLM Processor │    │ • LLM Processor │
+│ • Health Check  │    │ • Gossip Client │    │ • Gossip Client │
+│ • Metrics       │    │ • Circuit Brkr  │    │ • Circuit Brkr  │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          └───────────────────────┼───────────────────────┘
                                  │
                     ┌─────────────────┐
-                    │   Discovery     │
-                    │   Service       │
+                    │   Gossip        │
+                    │   Network       │
+                    │                 │
+                    │ • Peer Discovery│
+                    │ • Failure Detect│
+                    │ • Task Redist.  │
                     └─────────────────┘
-```
-
-## Project Structure
-
-```
-llm-balancer/
-├── cmd/                    # Application entry points
-│   ├── gateway/           # Load balancer API gateway
-│   └── node/             # Individual LLM node
-├── internal/              # Internal packages
-│   ├── balancer/         # Load balancing logic
-│   ├── node/            # Node management & gossip protocol
-│   ├── queue/           # Task queue implementation
-│   ├── models/          # Data structures
-│   ├── config/          # Configuration management
-│   └── interfaces/      # Core interfaces
-├── pkg/                  # Public packages
-│   ├── client/          # Client libraries
-│   └── utils/           # Shared utilities
-├── config.yaml          # Configuration file
-├── Makefile            # Build and run commands
-└── README.md           # This file
-```
-
-## Core Components
-
-### Load Balancer
-- **Multiple strategies**: Round-robin, least-loaded, weighted, random
-- **Health-aware routing**: Routes only to healthy nodes
-- **Capacity-aware**: Considers node capacity and task complexity
-- **Thread-safe**: Concurrent access to node status and capacity
-
-### Gossip Protocol
-- **Failure Detection**: Automatic detection of failed nodes
-- **Task Redistribution**: Redistribute tasks from failed nodes
-- **Peer Discovery**: Automatic peer discovery and management
-- **Fault Tolerance**: Three-state failure detection (alive/suspected/dead)
-
-### Task Queue
-- **Priority-based**: Higher priority tasks are processed first
-- **Concurrency-safe**: Thread-safe operations with mutex protection
-- **Capacity management**: Configurable queue size limits
-- **Timeout support**: Configurable timeouts for task processing
-
-### Task Tracker
-- **Task Monitoring**: Track all tasks and their states
-- **Failure Recovery**: Identify failed and orphaned tasks
-- **Redistribution**: Mark tasks for redistribution when nodes fail
-- **Statistics**: Comprehensive task statistics and monitoring
-
-### Node Management
-- **Capacity tracking**: Monitors requests/minute and tokens/minute
-- **Health monitoring**: Real-time health status updates
-- **Worker pools**: Multithreaded task processing
-- **Load balancing**: Intelligent task distribution
-
-## Load Balancing Strategies
-
-1. **Round Robin**: Distributes tasks evenly across nodes
-2. **Least Loaded**: Routes to the node with the lowest current load
-3. **Weighted**: Considers node capacity, current load, and queue length
-4. **Random**: Routes to a random healthy node
-
-## Failure Handling
-
-### Gossip Protocol
-- **Periodic Gossip**: Nodes exchange status every 10 seconds
-- **Failure Detection**: Nodes marked as suspicious after 15 seconds, dead after 30 seconds
-- **Task Redistribution**: Failed node tasks automatically redistributed to healthy nodes
-- **Peer Management**: Automatic peer discovery and cleanup
-
-### Task Recovery
-- **Failed Tasks**: Tasks that failed or ran too long
-- **Orphaned Tasks**: Tasks that have been pending too long
-- **Automatic Redistribution**: Tasks redistributed to available nodes
-- **State Tracking**: Complete task state tracking for recovery
-
-## Configuration
-
-The system is configured via `config.yaml`:
-
-```yaml
-node:
-  id: "node-1"
-  address: "localhost:8081"
-  max_requests_per_minute: 100
-  max_tokens_per_minute: 10000
-  max_concurrent_tasks: 10
-  max_queue_size: 1000
-  worker_pool_size: 5
-
-gateway:
-  host: "0.0.0.0"
-  port: 8080
-  load_balancing_strategy: "round_robin"
-  circuit_breaker_enabled: true
-
-queue:
-  capacity: 1000
-  priority_enabled: true
-  timeout: "30s"
-  retry_attempts: 3
 ```
 
 ## Quick Start
 
-### 1. Build the applications
+### Prerequisites
+
+- Go 1.21 or higher
+- At least 2GB RAM per node
+- Network connectivity between nodes
+
+### Installation
+
 ```bash
+# Clone the repository
+git clone https://github.com/your-org/llm-balancer.git
+cd llm-balancer
+
+# Build the binaries
 make build
+
+# Or build individually
+go build -o bin/gateway cmd/gateway/main.go
+go build -o bin/node cmd/node/main.go
 ```
 
-### 2. Start the gateway
-```bash
-make run-gateway
+### Configuration
+
+Create a configuration file `config.yaml`:
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+gateway:
+  host: "0.0.0.0"
+  port: 8081
+  load_balancing_strategy: "adaptive"  # round_robin, least_loaded, weighted, random, adaptive, geographic
+
+node:
+  id: "node-1"
+  address: "localhost:8080"
+  max_queue_size: 1000
+  max_concurrent_tasks: 10
+  max_requests_per_minute: 100
+  max_tokens_per_minute: 10000
+  worker_pool_size: 5
+  heartbeat_interval: "30s"
+
+logging:
+  level: "info"
+  format: "json"  # json or text
 ```
 
-### 3. Start multiple nodes (in separate terminals)
+### Running the System
+
+1. **Start the Gateway**:
 ```bash
-# Terminal 1
-NODE_ID=node-1 NODE_PORT=8081 make run-node
-
-# Terminal 2  
-NODE_ID=node-2 NODE_PORT=8082 make run-node
-
-# Terminal 3
-NODE_ID=node-3 NODE_PORT=8083 make run-node
+./bin/gateway config.yaml
 ```
 
-### 4. Submit a task
+2. **Start Multiple Nodes**:
 ```bash
-curl -X POST http://localhost:8080/api/v1/tasks \
+# Node 1
+./bin/node config-node1.yaml
+
+# Node 2 (different config)
+./bin/node config-node2.yaml
+```
+
+3. **Submit Tasks**:
+```bash
+curl -X POST http://localhost:8081/api/v1/tasks \
   -H "Content-Type: application/json" \
   -d '{
     "payload": "Hello, world!",
     "parameters": {
-      "model": "llama2",
+      "model": "gpt-3.5-turbo",
+      "temperature": 0.7,
       "max_tokens": 100
     },
-    "priority": 1
+    "priority": 5
   }'
 ```
 
-## API Endpoints
+## API Reference
 
-### Gateway API (`:8080`)
+### Task Management
 
-#### Task Management
-- `POST /api/v1/tasks` - Submit a new task
-- `GET /api/v1/tasks/:taskId` - Get specific task status
-- `GET /api/v1/tasks` - Get all tasks across all nodes
+#### Submit Task
+```http
+POST /api/v1/tasks
+Content-Type: application/json
 
-#### Node Management
-- `GET /api/v1/nodes` - List all nodes with status
-- `GET /api/v1/nodes/count` - Get node count statistics
-- `GET /api/v1/nodes/health` - Get detailed health status of all nodes
-- `GET /api/v1/nodes/:nodeId` - Get detailed information about a specific node
-- `POST /api/v1/nodes` - Register a new node
-- `DELETE /api/v1/nodes/:nodeId` - Unregister a node
-
-#### System Monitoring
-- `GET /api/v1/stats` - Get comprehensive system statistics
-- `GET /api/v1/stats/overview` - Get system overview with health percentages
-- `GET /api/v1/stats/tasks` - Get detailed task statistics across all nodes
-- `GET /api/v1/stats/capacity` - Get capacity utilization statistics
-
-#### Health and Status
-- `GET /api/v1/health` - Basic health check
-- `GET /api/v1/status` - Overall system status (healthy/degraded/down)
-
-### Node API (`:8081`)
-
-- `POST /api/v1/tasks` - Submit a task directly to this node
-- `GET /api/v1/tasks/:taskId` - Get task status
-- `GET /api/v1/tasks/failed` - Get failed/orphaned tasks for redistribution
-- `GET /api/v1/status` - Get node status
-- `GET /api/v1/capacity` - Get node capacity
-- `GET /api/v1/queue/stats` - Get queue statistics
-- `POST /api/v1/gossip` - Handle gossip messages
-- `GET /api/v1/peers` - Get known peers
-- `GET /health` - Health check
-
-## API Examples
-
-### Get System Overview
-```bash
-curl http://localhost:8080/api/v1/stats/overview
-```
-
-Response:
-```json
 {
-  "system": {
-    "total_nodes": 3,
-    "healthy_nodes": 2,
-    "unhealthy_nodes": 1,
-    "health_percentage": 66.67
+  "payload": "Your input text",
+  "parameters": {
+    "model": "gpt-3.5-turbo",
+    "temperature": 0.7,
+    "max_tokens": 100
   },
-  "tasks": {
-    "total_active": 5,
-    "total_queued": 12,
-    "total_tasks": 17
-  },
-  "performance": {
-    "average_load": 0.45,
-    "total_load": 1.35
-  },
-  "balancer": {
-    "strategy": "round_robin",
-    "last_updated": "2024-01-15T10:30:00Z"
-  }
+  "priority": 5
 }
 ```
 
-### Get Node Health
-```bash
-curl http://localhost:8080/api/v1/nodes/health
+#### Get Task Status
+```http
+GET /api/v1/tasks/{taskId}
 ```
 
-Response:
-```json
-{
-  "nodes": [
+#### Get All Tasks
+```http
+GET /api/v1/tasks
+```
+
+### Node Management
+
+#### Get Node Status
+```http
+GET /api/v1/nodes
+```
+
+#### Register Node
+```http
+POST /api/v1/nodes
+Content-Type: application/json
+
     {
       "node_id": "node-1",
-      "address": "localhost:8081",
-      "healthy": true,
-      "last_heartbeat": "2024-01-15T10:30:00Z",
-      "active_tasks": 2,
-      "queue_length": 5,
-      "load": 0.4
-    }
-  ],
-  "total_nodes": 1,
-  "healthy_count": 1
+  "address": "localhost:8080"
 }
 ```
 
-### Get Capacity Statistics
+### System Monitoring
+
+#### Get System Stats
+```http
+GET /api/v1/stats
+```
+
+#### Get Health Status
+```http
+GET /api/v1/health
+```
+
+## Load Balancing Strategies
+
+### Round Robin
+- Distributes tasks evenly across all healthy nodes
+- Simple and predictable
+- Good for uniform workloads
+
+### Least Loaded
+- Routes to the node with the lowest current load
+- Considers active tasks, queue length, and capacity
+- Optimal for maximizing throughput
+
+### Weighted
+- Uses sophisticated scoring based on multiple factors:
+  - Node capacity (tokens/minute)
+  - Current load (active tasks)
+  - Queue utilization
+  - Health status
+- Best for heterogeneous node capabilities
+
+### Random
+- Random selection with weighted distribution
+- Good for load distribution and avoiding hotspots
+- Uses node capacity as weight
+
+### Adaptive
+- Dynamically selects strategy based on system conditions:
+  - Few nodes (< 3): Least loaded
+  - High load (> 80%): Weighted
+  - High latency (> 100ms): Geographic
+  - Normal conditions: Adaptive weighted random
+- Optimal for varying workloads
+
+### Geographic
+- Routes based on geographic proximity (placeholder)
+- Reduces latency for distributed deployments
+- Falls back to weighted selection
+
+## Circuit Breaker Pattern
+
+The system implements circuit breakers for each node:
+
+- **Closed**: Normal operation, requests pass through
+- **Open**: Node is failing, requests are blocked
+- **Half-Open**: Testing if node has recovered
+
+Configuration:
+- Failure threshold: 5 consecutive failures
+- Timeout: 30 seconds before retry
+- Success threshold: 5 consecutive successes to close
+
+## Gossip Protocol
+
+### Features
+- **Peer Discovery**: Automatic node discovery and registration
+- **Failure Detection**: Three-state failure detection (alive, suspected, dead)
+- **Task Redistribution**: Automatic recovery of tasks from failed nodes
+- **Latency Monitoring**: Continuous latency measurement and optimization
+- **Load Sharing**: Intelligent load distribution across healthy peers
+
+### States
+- **Alive**: Node is healthy and responding
+- **Suspected**: Node may be failing, under observation
+- **Dead**: Node has failed, tasks being redistributed
+
+## Monitoring and Metrics
+
+### Key Metrics
+- **Processing Time**: Average task processing time
+- **Error Rate**: Percentage of failed tasks
+- **Queue Utilization**: Queue fullness percentage
+- **Node Health**: Individual node health status
+- **System Load**: Overall system load and capacity
+
+### Health Checks
+- **Queue Health**: Queue not too full (< 90%)
+- **Capacity Health**: Concurrent tasks within limits
+- **Error Rate**: Error rate below threshold (< 10%)
+- **Node Connectivity**: All nodes reachable
+
+## Production Deployment
+
+### Docker Deployment
+
+```dockerfile
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY . .
+RUN go build -o gateway cmd/gateway/main.go
+RUN go build -o node cmd/node/main.go
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/gateway .
+COPY --from=builder /app/node .
+CMD ["./gateway"]
+```
+
+### Kubernetes Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-balancer-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-balancer-gateway
+  template:
+    metadata:
+      labels:
+        app: llm-balancer-gateway
+    spec:
+      containers:
+      - name: gateway
+        image: llm-balancer:latest
+        command: ["./gateway"]
+        args: ["/config/config.yaml"]
+        ports:
+        - containerPort: 8081
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: llm-balancer-config
+```
+
+### Environment Variables
+
 ```bash
-curl http://localhost:8080/api/v1/stats/capacity
+# Gateway configuration
+GATEWAY_HOST=0.0.0.0
+GATEWAY_PORT=8081
+GATEWAY_STRATEGY=adaptive
+
+# Node configuration
+NODE_ID=node-1
+NODE_ADDRESS=localhost:8080
+NODE_MAX_QUEUE_SIZE=1000
+NODE_MAX_CONCURRENT_TASKS=10
+NODE_WORKER_POOL_SIZE=5
+
+# Logging
+LOG_LEVEL=info
+LOG_FORMAT=json
 ```
 
-Response:
-```json
-{
-  "nodes": [
-    {
-      "node_id": "node-1",
-      "address": "localhost:8081",
-      "healthy": true,
-      "capacity": {
-        "max_requests_per_minute": 100,
-        "max_tokens_per_minute": 10000,
-        "max_concurrent_tasks": 10,
-        "max_queue_size": 1000,
-        "current_requests_per_min": 25,
-        "current_tokens_per_min": 2500,
-        "current_concurrent_tasks": 2,
-        "utilization_percentage": 20.0
-      }
-    }
-  ],
-  "system_capacity": {
-    "max_requests_per_minute": 100,
-    "max_tokens_per_minute": 10000,
-    "max_concurrent_tasks": 10,
-    "max_queue_size": 1000,
-    "current_requests_per_min": 25,
-    "current_tokens_per_min": 2500,
-    "current_concurrent_tasks": 2,
-    "utilization_percentage": 20.0
-  }
-}
+## Performance Tuning
+
+### Queue Configuration
+- **Max Queue Size**: Adjust based on memory and expected load
+- **Worker Pool Size**: Match to CPU cores and expected concurrency
+- **Priority Levels**: Use 0-10 scale for task prioritization
+
+### Load Balancer Tuning
+- **Strategy Selection**: Choose based on workload characteristics
+- **Circuit Breaker**: Adjust thresholds for your failure patterns
+- **Health Check Interval**: Balance responsiveness vs overhead
+
+### Node Configuration
+- **Token Limits**: Set based on your LLM provider limits
+- **Concurrent Tasks**: Match to your model's concurrency limits
+- **Heartbeat Interval**: Balance responsiveness vs network overhead
+
+## Troubleshooting
+
+### Common Issues
+
+1. **High Error Rate**
+   - Check node health and connectivity
+   - Verify LLM provider limits
+   - Review circuit breaker settings
+
+2. **Queue Full**
+   - Increase queue size or add more nodes
+   - Check for stuck tasks
+   - Review task processing time
+
+3. **Slow Processing**
+   - Check node capacity and load
+   - Verify LLM provider performance
+   - Review network latency
+
+### Debug Commands
+
+```bash
+# Check system health
+curl http://localhost:8081/api/v1/health
+
+# Get detailed stats
+curl http://localhost:8081/api/v1/stats
+
+# Check node status
+curl http://localhost:8081/api/v1/nodes
+
+# Get queue stats
+curl http://localhost:8080/api/v1/queue/stats
 ```
-
-## Development Status
-
-This is Task 1 of the implementation plan:
-
-- ✅ **Core Architecture & Project Structure**
-- ✅ **Load Balancer Implementation**
-- ✅ **Command-line Applications**
-- ✅ **Failure Handling & Gossip Protocol**
-- ⏳ Intelligent Routing & Task Classification
-- ⏳ Distributed Coordination & Monitoring
-- ⏳ Advanced Features & Optimization
-
-## Next Steps
-
-The next task will focus on enhancing the system with:
-- Real LLM integration (Ollama)
-- Better task classification and routing
-- Enhanced metrics and monitoring
-- Circuit breaker implementation
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Add tests
+4. Add tests for new functionality
 5. Submit a pull request
 
 ## License
 
-MIT License 
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Support
+
+For support and questions:
+- Create an issue on GitHub
+- Check the documentation
+- Review the troubleshooting guide 
