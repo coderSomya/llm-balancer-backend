@@ -48,10 +48,17 @@ llm-balancer/
 │   ├── client/          # Client libraries
 │   └── utils/           # Shared utilities
 ├── config.yaml          # Configuration file
+├── Makefile            # Build and run commands
 └── README.md           # This file
 ```
 
 ## Core Components
+
+### Load Balancer
+- **Multiple strategies**: Round-robin, least-loaded, weighted, random
+- **Health-aware routing**: Routes only to healthy nodes
+- **Capacity-aware**: Considers node capacity and task complexity
+- **Thread-safe**: Concurrent access to node status and capacity
 
 ### Task Queue
 - **Priority-based**: Higher priority tasks are processed first
@@ -65,11 +72,12 @@ llm-balancer/
 - **Worker pools**: Multithreaded task processing
 - **Load balancing**: Intelligent task distribution
 
-### Load Balancer
-- **Multiple strategies**: Round-robin, least-loaded, weighted
-- **Health-aware routing**: Routes only to healthy nodes
-- **Circuit breaker**: Prevents cascading failures
-- **Node discovery**: Automatic node registration/deregistration
+## Load Balancing Strategies
+
+1. **Round Robin**: Distributes tasks evenly across nodes
+2. **Least Loaded**: Routes to the node with the lowest current load
+3. **Weighted**: Considers node capacity, current load, and queue length
+4. **Random**: Routes to a random healthy node
 
 ## Configuration
 
@@ -98,24 +106,26 @@ queue:
   retry_attempts: 3
 ```
 
-## Usage
+## Quick Start
 
-### Starting a Node
-
+### 1. Build the applications
 ```bash
-go run cmd/node/main.go --config config.yaml
+make build
 ```
 
-### Starting the Gateway
-
+### 2. Start the gateway
 ```bash
-go run cmd/gateway/main.go --config config.yaml
+make run-gateway
 ```
 
-### Submitting Tasks
-
+### 3. Start a node (in another terminal)
 ```bash
-curl -X POST http://localhost:8080/tasks \
+make run-node
+```
+
+### 4. Submit a task
+```bash
+curl -X POST http://localhost:8080/api/v1/tasks \
   -H "Content-Type: application/json" \
   -d '{
     "payload": "Hello, world!",
@@ -127,24 +137,46 @@ curl -X POST http://localhost:8080/tasks \
   }'
 ```
 
+## API Endpoints
+
+### Gateway API (`:8080`)
+
+- `POST /api/v1/tasks` - Submit a new task
+- `GET /api/v1/tasks/:taskId` - Get task status
+- `GET /api/v1/nodes` - List all nodes
+- `GET /api/v1/stats` - Get load balancer statistics
+- `POST /api/v1/nodes` - Register a new node
+- `DELETE /api/v1/nodes/:nodeId` - Unregister a node
+- `GET /health` - Health check
+
+### Node API (`:8081`)
+
+- `POST /api/v1/tasks` - Submit a task directly to this node
+- `GET /api/v1/tasks/:taskId` - Get task status
+- `GET /api/v1/status` - Get node status
+- `GET /api/v1/capacity` - Get node capacity
+- `GET /api/v1/queue/stats` - Get queue statistics
+- `GET /health` - Health check
+
 ## Development Status
 
 This is Task 1 of the implementation plan:
 
 - ✅ **Core Architecture & Project Structure**
-- ⏳ Node Implementation
-- ⏳ Load Balancer API Gateway
+- ✅ **Load Balancer Implementation**
+- ✅ **Command-line Applications**
+- ⏳ Node Implementation (Enhanced)
 - ⏳ Intelligent Routing & Task Classification
 - ⏳ Distributed Coordination & Monitoring
 - ⏳ Advanced Features & Optimization
 
 ## Next Steps
 
-The next task will focus on implementing the individual LLM nodes with:
-- Task queue integration
-- Worker pool management
-- Capacity tracking
-- Health monitoring
+The next task will focus on enhancing the node implementation with:
+- Real LLM integration (Ollama)
+- Better task tracking and persistence
+- Enhanced metrics and monitoring
+- Circuit breaker implementation
 
 ## Contributing
 
