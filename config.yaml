@@ -1,0 +1,39 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+node:
+  id: "node-1"
+  address: "localhost:8081"
+  max_requests_per_minute: 100
+  max_tokens_per_minute: 10000
+  max_concurrent_tasks: 10
+  max_queue_size: 1000
+  worker_pool_size: 5
+  heartbeat_interval: "30s"
+  health_check_timeout: "10s"
+
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+  node_discovery_interval: "60s"
+  load_balancing_strategy: "round_robin"
+  circuit_breaker_enabled: true
+  circuit_breaker_threshold: 5
+
+queue:
+  capacity: 1000
+  priority_enabled: true
+  timeout: "30s"
+  retry_attempts: 3
+  retry_delay: "5s"
+
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+
+metrics:
+  enabled: true
+  port: 9090
+  path: "/metrics" 
