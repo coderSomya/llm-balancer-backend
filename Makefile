@@ -1,71 +1,92 @@
-.PHONY: build run-gateway run-node test clean help
+.PHONY: build clean test run-gateway run-node run-client setup
 
-# Default target
-all: build
-
-# Build the applications
+# Build all components
 build:
-	@echo "Building LLM Balancer..."
+	@echo "🔨 Building LLM Balancer components..."
+	@mkdir -p bin
 	go build -o bin/gateway cmd/gateway/main.go
 	go build -o bin/node cmd/node/main.go
-	@echo "Build complete!"
-
-# Run the gateway
-run-gateway: build
-	@echo "Starting Gateway..."
-	./bin/gateway config.yaml
-
-# Run a node
-run-node: build
-	@echo "Starting Node..."
-	./bin/node config.yaml
-
-# Run both gateway and node (in separate terminals)
-run-all: build
-	@echo "Starting Gateway and Node..."
-	@echo "Gateway will run on port 8080"
-	@echo "Node will run on port 8081"
-	@echo "Use 'make run-gateway' and 'make run-node' in separate terminals"
-
-# Test the applications
-test:
-	@echo "Running tests..."
-	go test ./...
+	go build -o bin/client cmd/client/main.go
+	@echo "✅ Build complete!"
 
 # Clean build artifacts
 clean:
-	@echo "Cleaning..."
+	@echo "🧹 Cleaning build artifacts..."
 	rm -rf bin/
-	go clean
+	@echo "✅ Clean complete!"
 
-# Install dependencies
-deps:
-	@echo "Installing dependencies..."
-	go mod download
-	go mod tidy
+# Run setup script
+setup:
+	@echo "🚀 Running setup script..."
+	./test-setup.sh
 
-# Format code
-fmt:
-	@echo "Formatting code..."
-	go fmt ./...
+# Run gateway
+run-gateway:
+	@echo "🌐 Starting Gateway..."
+	./bin/gateway config-gateway.yaml
 
-# Lint code
-lint:
-	@echo "Linting code..."
-	golangci-lint run
+# Run node
+run-node:
+	@echo "🖥️  Starting Node..."
+	./bin/node config-test.yaml
 
-# Show help
+# Run client
+run-client:
+	@echo "📤 Running Test Client..."
+	./bin/client
+
+# Test the complete system
+test-system:
+	@echo "🧪 Testing complete system..."
+	@echo "1. Make sure Ollama is running: ollama serve"
+	@echo "2. Make sure qwen2.5 is available: ollama pull qwen2.5"
+	@echo "3. Start gateway in one terminal: make run-gateway"
+	@echo "4. Start node in another terminal: make run-node"
+	@echo "5. Run client in third terminal: make run-client"
+
+# Check if Ollama is running
+check-ollama:
+	@echo "🔍 Checking Ollama status..."
+	@if curl -s http://localhost:11434/api/tags > /dev/null; then \
+		echo "✅ Ollama is running"; \
+	else \
+		echo "❌ Ollama is not running. Please start it with: ollama serve"; \
+		exit 1; \
+	fi
+
+# Check if qwen2.5 model is available
+check-model:
+	@echo "🔍 Checking for qwen2.5 model..."
+	@if curl -s http://localhost:11434/api/tags | grep -q "qwen2.5"; then \
+		echo "✅ qwen2.5 model is available"; \
+	else \
+		echo "⚠️  qwen2.5 model not found. Pulling it now..."; \
+		ollama pull qwen2.5; \
+	fi
+
+# Full setup and test
+all: check-ollama check-model build test-system
+
+# Help
 help:
-	@echo "LLM Balancer Makefile"
+	@echo "LLM Balancer Makefile Commands:"
 	@echo ""
-	@echo "Available targets:"
-	@echo "  build       - Build the applications"
-	@echo "  run-gateway - Run the gateway server"
-	@echo "  run-node    - Run a node server"
-	@echo "  run-all     - Show instructions for running both"
-	@echo "  test        - Run tests"
-	@echo "  clean       - Clean build artifacts"
-	@echo "  deps        - Install dependencies"
-	@echo "  fmt         - Format code"
-	@echo "  lint        - Lint code"
-	@echo "  help        - Show this help" 
+	@echo "  build        - Build all components (gateway, node, client)"
+	@echo "  clean        - Remove build artifacts"
+	@echo "  setup        - Run the setup script"
+	@echo "  run-gateway  - Start the gateway server"
+	@echo "  run-node     - Start a node server"
+	@echo "  run-client   - Run the test client"
+	@echo "  test-system  - Show instructions for testing the complete system"
+	@echo "  check-ollama - Check if Ollama is running"
+	@echo "  check-model  - Check if qwen2.5 model is available"
+	@echo "  all          - Full setup: check Ollama, pull model, build, test"
+	@echo "  help         - Show this help message"
+	@echo ""
+	@echo "Quick start:"
+	@echo "  1. make check-ollama"
+	@echo "  2. make check-model"
+	@echo "  3. make build"
+	@echo "  4. make run-gateway (in terminal 1)"
+	@echo "  5. make run-node (in terminal 2)"
+	@echo "  6. make run-client (in terminal 3)" 

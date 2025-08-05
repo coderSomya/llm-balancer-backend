@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -17,7 +19,7 @@ import (
 	"llm-balancer/internal/models"
 	"llm-balancer/internal/queue"
 	"llm-balancer/internal/node"
-	"math/rand"
+	"llm-balancer/internal/ollama"
 )
 
 type NodeServer struct {
@@ -31,6 +33,7 @@ type NodeServer struct {
 	cancel       context.CancelFunc
 	gossipMgr    *node.GossipManager
 	taskTracker  *node.TaskTracker
+	ollamaClient *ollama.OllamaClient
 	
 	// Production features
 	processingMetrics map[string]interface{}
@@ -79,6 +82,25 @@ func main() {
 	gossipMgr := node.NewGossipManager(cfg.Node.ID, cfg.Node.Address, taskQueue)
 	taskTracker := node.NewTaskTracker()
 	
+	// Create Ollama client
+	ollamaClient := ollama.NewOllamaClient("http://localhost:11434")
+	
+	// Test Ollama connection
+	if err := ollamaClient.HealthCheck(); err != nil {
+		logger.Warnf("Ollama health check failed: %v", err)
+		logger.Info("Make sure Ollama is running on localhost:11434")
+	} else {
+		logger.Info("✅ Ollama connection established")
+		
+		// List available models
+		models, err := ollamaClient.ListModels()
+		if err != nil {
+			logger.Warnf("Failed to list models: %v", err)
+		} else {
+			logger.Infof("Available models: %v", models)
+		}
+	}
+	
 	// Create node server
 	server := &NodeServer{
 		config:      cfg,
@@ -90,9 +112,18 @@ func main() {
 		cancel:      cancel,
 		gossipMgr:   gossipMgr,
 		taskTracker: taskTracker,
+		ollamaClient: ollamaClient,
 		processingMetrics: make(map[string]interface{}),
 		errorCounts:       make(map[string]int),
 		successCounts:     make(map[string]int),
+	}
+	
+	// Register node with gateway
+	if err := server.registerWithGateway(); err != nil {
+		logger.Warnf("Failed to register with gateway: %v", err)
+		logger.Info("Node will continue running but may not receive tasks until registered")
+	} else {
+		logger.Info("✅ Successfully registered with gateway")
 	}
 	
 	// Start the server
@@ -329,7 +360,7 @@ func (s *NodeServer) processTask(task *models.Task, workerID int) {
 	
 	s.logger.Infof("Worker %d processing task %s", workerID, task.ID)
 	
-	// Process task with production-ready LLM processing
+	// Process task with real Ollama integration
 	result, err := s.processLLMTask(task, workerID)
 	
 	processingTime := time.Since(startTime)
@@ -355,6 +386,16 @@ func (s *NodeServer) processLLMTask(task *models.Task, workerID int) (*models.Ta
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	
+	// Record start time for processing duration
+	startTime := time.Now()
+	
+	// Check context cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 	
 	// Parse task parameters
 	var llmParams struct {
@@ -382,116 +423,60 @@ func (s *NodeServer) processLLMTask(task *models.Task, workerID int) (*models.Ta
 	
 	// Set defaults
 	if llmParams.Model == "" {
-		llmParams.Model = "gpt-3.5-turbo"
+		llmParams.Model = "qwen2.5"
 	}
 	if llmParams.Temperature == 0 {
 		llmParams.Temperature = 0.7
 	}
 	if llmParams.MaxTokens == 0 {
-		llmParams.MaxTokens = 1000
+		llmParams.MaxTokens = 500
 	}
 	
-	// Simulate LLM processing with realistic behavior
-	return s.simulateLLMProcessing(ctx, task, llmParams, workerID)
-}
-
-func (s *NodeServer) simulateLLMProcessing(ctx context.Context, task *models.Task, params struct {
-	Model       string
-	Temperature float64
-	MaxTokens   int
-	StopWords   []string
-	ExtraParams map[string]interface{}
-}, workerID int) (*models.TaskResult, error) {
-	// Check context cancellation
+	// Call Ollama
+	prompt := string(task.Payload)
+	parameters := map[string]interface{}{
+		"model":       llmParams.Model,
+		"temperature": llmParams.Temperature,
+		"max_tokens":  llmParams.MaxTokens,
+	}
+	
+	ollamaResp, err := s.ollamaClient.Generate(prompt, parameters)
+	if err != nil {
+		return nil, fmt.Errorf("Ollama generation failed: %v", err)
+	}
+	
+	// Check context cancellation during processing
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 	}
-	
-	// Simulate processing time based on task size and model
-	baseTime := time.Duration(len(task.Payload)/100) * time.Millisecond
-	
-	// Add model-specific processing time
-	switch params.Model {
-	case "gpt-4":
-		baseTime *= 2
-	case "gpt-3.5-turbo":
-		baseTime *= 1
-	default:
-		baseTime *= 1.5
-	}
-	
-	// Add temperature effect (higher temperature = more processing time)
-	baseTime = time.Duration(float64(baseTime) * (1 + params.Temperature*0.5))
-	
-	// Simulate processing with potential errors
-	if s.shouldSimulateError() {
-		// Simulate partial processing before error
-		time.Sleep(baseTime / 3)
-		return nil, fmt.Errorf("simulated LLM processing error")
-	}
-	
-	// Simulate processing
-	time.Sleep(baseTime)
-	
-	// Check for context cancellation during processing
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-	
-	// Generate realistic response
-	response := s.generateRealisticResponse(task.Payload, params)
 	
 	// Calculate tokens used (rough estimation)
-	tokensUsed := len(response) / 4
-	if tokensUsed > params.MaxTokens {
-		tokensUsed = params.MaxTokens
+	tokensUsed := len(ollamaResp.Response) / 4
+	if tokensUsed > llmParams.MaxTokens {
+		tokensUsed = llmParams.MaxTokens
 	}
 	
+	processingTime := time.Since(startTime)
+	
 	return &models.TaskResult{
-		Response:       []byte(response),
+		Response:       []byte(ollamaResp.Response),
 		TokensUsed:     tokensUsed,
-		ProcessingTime: baseTime,
+		ProcessingTime: processingTime,
 		Metadata: map[string]interface{}{
 			"worker_id":    fmt.Sprintf("worker-%d", workerID),
 			"node_id":      s.config.Node.ID,
-			"model":        params.Model,
-			"temperature":  params.Temperature,
-			"max_tokens":   params.MaxTokens,
-			"stop_words":   params.StopWords,
-			"extra_params": params.ExtraParams,
+			"model":        llmParams.Model,
+			"temperature":  llmParams.Temperature,
+			"max_tokens":   llmParams.MaxTokens,
+			"stop_words":   llmParams.StopWords,
+			"extra_params": llmParams.ExtraParams,
+			"ollama_model": ollamaResp.Model,
+			"total_duration": ollamaResp.TotalDuration,
+			"eval_count":   ollamaResp.EvalCount,
 		},
 	}, nil
-}
-
-func (s *NodeServer) shouldSimulateError() bool {
-	// Simulate 5% error rate for realistic testing
-	return rand.Intn(100) < 5
-}
-
-func (s *NodeServer) generateRealisticResponse(payload []byte, params struct {
-	Model       string
-	Temperature float64
-	MaxTokens   int
-	StopWords   []string
-	ExtraParams map[string]interface{}
-}) string {
-	input := string(payload)
-	
-	// Generate response based on input type
-	if len(input) < 50 {
-		// Short input - generate a simple response
-		return fmt.Sprintf("Processed: %s\n\nResponse: This is a concise response to your request.", input)
-	} else if len(input) < 200 {
-		// Medium input - generate a detailed response
-		return fmt.Sprintf("Processed: %s\n\nDetailed Response: Based on your input, here is a comprehensive analysis and response that addresses your query thoroughly.", input)
-	} else {
-		// Long input - generate a structured response
-		return fmt.Sprintf("Processed: %s\n\nStructured Response:\n1. Analysis: Comprehensive analysis of your input\n2. Recommendations: Specific recommendations based on the analysis\n3. Conclusion: Summary of key points and next steps", input)
-	}
 }
 
 func (s *NodeServer) handleProcessingError(task *models.Task, err error, processingTime time.Duration) {
@@ -742,6 +727,46 @@ func (s *NodeServer) calculateErrorRate() float64 {
 	}
 	
 	return float64(totalErrors) / float64(totalErrors+totalSuccess)
+}
+
+func (s *NodeServer) registerWithGateway() error {
+	// Create registration request
+	req := map[string]interface{}{
+		"node_id": s.config.Node.ID,
+		"address": s.config.Node.Address,
+		"status": map[string]interface{}{
+			"id":              s.config.Node.ID,
+			"address":         s.config.Node.Address,
+			"requests_per_min": 0,
+			"tokens_per_min":   0,
+			"current_load":     0.0,
+			"health":           true,
+			"last_heartbeat":   time.Now(),
+			"active_tasks":     0,
+			"queue_length":     0,
+		},
+	}
+	
+	// Convert to JSON
+	jsonData, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal registration request: %v", err)
+	}
+	
+	// Send registration request to gateway
+	gatewayURL := fmt.Sprintf("http://localhost:%d", s.config.Gateway.Port)
+	resp, err := http.Post(gatewayURL+"/api/v1/nodes", "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return fmt.Errorf("failed to send registration request: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("gateway returned status %d: %s", resp.StatusCode, string(body))
+	}
+	
+	return nil
 }
 
 func generateTaskID() string {

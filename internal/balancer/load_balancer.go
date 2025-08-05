@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 	"llm-balancer/internal/models"
-	"llm-balancer/internal/interfaces"
 )
 
 // CircuitBreakerState represents the state of a circuit breaker
@@ -380,8 +379,8 @@ func (lb *LoadBalancer) calculateComprehensiveLoad(status *models.NodeStatus, ca
 	// Queue load
 	queueLoad := float64(status.QueueLength) / float64(capacity.MaxQueueSize)
 	
-	// Token load
-	tokenLoad := float64(capacity.CurrentTokensPerMinute) / float64(capacity.MaxTokensPerMinute)
+			// Token load
+		tokenLoad := float64(capacity.CurrentTokensPerMin) / float64(capacity.MaxTokensPerMinute)
 	
 	// Weighted combination
 	comprehensiveLoad := activeLoad*0.5 + queueLoad*0.3 + tokenLoad*0.2
@@ -444,8 +443,8 @@ func (lb *LoadBalancer) calculateWeightedScore(status *models.NodeStatus, capaci
 	// Queue score (lower queue = better)
 	queueScore := 1.0 - (float64(status.QueueLength) / float64(capacity.MaxQueueSize))
 	
-	// Token utilization score (lower utilization = better)
-	tokenScore := 1.0 - (float64(capacity.CurrentTokensPerMinute) / float64(capacity.MaxTokensPerMinute))
+			// Token utilization score (lower utilization = better)
+		tokenScore := 1.0 - (float64(capacity.CurrentTokensPerMin) / float64(capacity.MaxTokensPerMinute))
 	
 	// Health score (based on last heartbeat)
 	healthScore := 1.0
@@ -621,6 +620,11 @@ func (lb *LoadBalancer) recordNodeSelection(nodeID, strategy string) {
 	}
 }
 
+// GetStrategy returns the current load balancing strategy
+func (lb *LoadBalancer) GetStrategy() string {
+	return lb.strategy
+}
+
 // GetStats returns comprehensive load balancer statistics
 func (lb *LoadBalancer) GetStats() map[string]interface{} {
 	lb.mu.RLock()
@@ -651,7 +655,7 @@ func (lb *LoadBalancer) GetStats() map[string]interface{} {
 				"max_concurrent_tasks": capacity.MaxConcurrentTasks,
 				"max_tokens_per_minute": capacity.MaxTokensPerMinute,
 				"current_concurrent_tasks": capacity.CurrentConcurrentTasks,
-				"current_tokens_per_minute": capacity.CurrentTokensPerMinute,
+				"current_tokens_per_minute": capacity.CurrentTokensPerMin,
 			}
 		}
 		

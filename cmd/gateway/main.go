@@ -49,7 +49,7 @@ type TaskInfo struct {
 }
 
 type TaskRequest struct {
-	Payload    []byte                 `json:"payload"`
+	Payload    string                 `json:"payload"`
 	Parameters map[string]interface{} `json:"parameters"`
 	Priority   int                    `json:"priority"`
 }
@@ -201,13 +201,13 @@ func (s *GatewayServer) handleSubmitTask(c *gin.Context) {
 	// Create task
 	task := models.NewTask(
 		generateTaskID(),
-		req.Payload,
+		[]byte(req.Payload),
 		req.Parameters,
 	)
 	task.Priority = req.Priority
 	
 	// Estimate tokens (improved estimation)
-	task.EstimatedTokens = s.estimateTokens(req.Payload, req.Parameters)
+	task.EstimatedTokens = s.estimateTokens([]byte(req.Payload), req.Parameters)
 	
 	// Route task
 	nodeID, err := s.balancer.RouteTask(c.Request.Context(), task)
@@ -245,7 +245,7 @@ func (s *GatewayServer) handleSubmitTask(c *gin.Context) {
 		LastUpdated: time.Now(),
 		RetryCount:  0,
 		MaxRetries:  3,
-		Payload:     req.Payload,
+		Payload:     []byte(req.Payload),
 		Parameters:  req.Parameters,
 		Priority:    req.Priority,
 	}
@@ -350,8 +350,8 @@ func (s *GatewayServer) handleGetTask(c *gin.Context) {
 		return
 	}
 	
-	// Update task info with current status
-	taskInfo.Status = currentStatus.Status
+			// Update task info with current status
+		taskInfo.Status = string(currentStatus.Status)
 	taskInfo.LastUpdated = time.Now()
 	
 	// If task is completed or failed, get the result
@@ -415,7 +415,7 @@ func (s *GatewayServer) handleGetAllTasks(c *gin.Context) {
 		
 		// Try to get current status from node
 		if currentStatus, err := s.getTaskStatusFromNode(task.NodeID, task.TaskID); err == nil {
-			taskData["status"] = currentStatus.Status
+			taskData["status"] = string(currentStatus.Status)
 			taskData["last_updated"] = time.Now()
 		}
 		
@@ -723,7 +723,7 @@ func (s *GatewayServer) handleGetSystemOverview(c *gin.Context) {
 			"total_load": totalLoad,
 		},
 		"balancer": map[string]interface{}{
-			"strategy": s.balancer.strategy,
+			"strategy": s.balancer.GetStrategy(),
 			"last_updated": time.Now(),
 		},
 	}
@@ -871,7 +871,7 @@ func (s *GatewayServer) handleGetSystemStatus(c *gin.Context) {
 			"by_status": taskCounts,
 		},
 		"balancer": map[string]interface{}{
-			"strategy": s.balancer.strategy,
+			"strategy": s.balancer.GetStrategy(),
 			"available": len(healthyNodes) > 0,
 		},
 		"uptime": "0h 0m 0s", // In a real implementation, track actual uptime

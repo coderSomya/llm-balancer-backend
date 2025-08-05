@@ -1,0 +1,22 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+gateway:
+  host: "0.0.0.0"
+  port: 8081
+  load_balancing_strategy: "adaptive"
+
+node:
+  id: "gateway"
+  address: "localhost:8081"
+  max_queue_size: 100
+  max_concurrent_tasks: 5
+  max_requests_per_minute: 50
+  max_tokens_per_minute: 5000
+  worker_pool_size: 3
+  heartbeat_interval: "30s"
+
+logging:
+  level: "info"
+  format: "text" 

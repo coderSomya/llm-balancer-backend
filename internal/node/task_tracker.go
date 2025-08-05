@@ -136,7 +136,6 @@ func (tt *TaskTracker) GetStats() map[string]interface{} {
 	
 	for _, task := range tt.tasks {
 		// Count by status
-		status := string(task.Status)
 		if count, exists := stats["by_status"].(map[models.TaskStatus]int); exists {
 			count[task.Status]++
 		}
