@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,17 +16,20 @@ import (
 	"llm-balancer/internal/config"
 	"llm-balancer/internal/models"
 	"llm-balancer/internal/queue"
+	"llm-balancer/internal/node"
 )
 
 type NodeServer struct {
-	config     *config.Config
-	queue      *queue.TaskQueue
-	status     *models.NodeStatus
-	capacity   *models.NodeCapacity
-	logger     *logrus.Logger
-	httpServer *http.Server
-	ctx        context.Context
-	cancel     context.CancelFunc
+	config       *config.Config
+	queue        *queue.TaskQueue
+	status       *models.NodeStatus
+	capacity     *models.NodeCapacity
+	logger       *logrus.Logger
+	httpServer   *http.Server
+	ctx          context.Context
+	cancel       context.CancelFunc
+	gossipMgr    *node.GossipManager
+	taskTracker  *node.TaskTracker
 }
 
 func main() {
@@ -64,15 +68,21 @@ func main() {
 		cfg.Node.MaxQueueSize,
 	)
 	
+	// Create gossip manager and task tracker
+	gossipMgr := node.NewGossipManager(cfg.Node.ID, cfg.Node.Address, taskQueue)
+	taskTracker := node.NewTaskTracker()
+	
 	// Create node server
 	server := &NodeServer{
-		config:   cfg,
-		queue:    taskQueue,
-		status:   nodeStatus,
-		capacity: nodeCapacity,
-		logger:   logger,
-		ctx:      ctx,
-		cancel:   cancel,
+		config:      cfg,
+		queue:       taskQueue,
+		status:      nodeStatus,
+		capacity:    nodeCapacity,
+		logger:      logger,
+		ctx:         ctx,
+		cancel:      cancel,
+		gossipMgr:   gossipMgr,
+		taskTracker: taskTracker,
 	}
 	
 	// Start the server
@@ -87,6 +97,9 @@ func (s *NodeServer) Start() error {
 	go s.startCapacityReset()
 	go s.startQueueProcessor()
 	
+	// Start gossip protocol
+	s.gossipMgr.Start()
+	
 	// Set up Gin router
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -97,9 +110,12 @@ func (s *NodeServer) Start() error {
 	{
 		api.POST("/tasks", s.handleSubmitTask)
 		api.GET("/tasks/:taskId", s.handleGetTask)
+		api.GET("/tasks/failed", s.handleGetFailedTasks)
 		api.GET("/status", s.handleGetStatus)
 		api.GET("/capacity", s.handleGetCapacity)
 		api.GET("/queue/stats", s.handleGetQueueStats)
+		api.POST("/gossip", s.handleGossip)
+		api.GET("/peers", s.handleGetPeers)
 	}
 	
 	// Health check
@@ -128,6 +144,9 @@ func (s *NodeServer) Start() error {
 	
 	// Cancel context to stop background tasks
 	s.cancel()
+	
+	// Stop gossip protocol
+	s.gossipMgr.Stop()
 	
 	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -216,6 +235,13 @@ func (s *NodeServer) processTask(task *models.Task) {
 	task.StartedAt = &startTime
 	task.NodeID = s.config.Node.ID
 	
+	// Update task in tracker
+	s.taskTracker.UpdateTask(task.ID, func(t *models.Task) {
+		t.Status = models.TaskStatusRunning
+		t.StartedAt = &startTime
+		t.NodeID = s.config.Node.ID
+	})
+	
 	// Increment capacity counters
 	s.capacity.IncrementTaskCounts(task.EstimatedTokens)
 	
@@ -239,6 +265,13 @@ func (s *NodeServer) processTask(task *models.Task) {
 			"node_id":   s.config.Node.ID,
 		},
 	}
+	
+	// Update task in tracker
+	s.taskTracker.UpdateTask(task.ID, func(t *models.Task) {
+		t.Status = models.TaskStatusCompleted
+		t.CompletedAt = &completedTime
+		t.Result = task.Result
+	})
 	
 	// Decrement capacity counters
 	s.capacity.DecrementTaskCounts(task.EstimatedTokens)
@@ -266,6 +299,9 @@ func (s *NodeServer) handleSubmitTask(c *gin.Context) {
 	)
 	task.Priority = req.Priority
 	task.EstimatedTokens = len(req.Payload) / 4 // Rough estimation
+	
+	// Add task to tracker
+	s.taskTracker.AddTask(task)
 	
 	// Check if queue is full
 	if s.queue.IsFull() {
@@ -295,12 +331,25 @@ func (s *NodeServer) handleSubmitTask(c *gin.Context) {
 func (s *NodeServer) handleGetTask(c *gin.Context) {
 	taskID := c.Param("taskId")
 	
-	// For now, return a mock response
-	// In a real implementation, we would track completed tasks
+	// Get task from tracker
+	task, exists := s.taskTracker.GetTask(taskID)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Task not found",
+		})
+		return
+	}
+	
+	c.JSON(http.StatusOK, task)
+}
+
+func (s *NodeServer) handleGetFailedTasks(c *gin.Context) {
+	// Get tasks that can be redistributed
+	tasks := s.taskTracker.GetTasksForRedistribution()
+	
 	c.JSON(http.StatusOK, gin.H{
-		"task_id": taskID,
-		"status":  "processing",
-		"message": "Task status tracking not implemented yet",
+		"tasks": tasks,
+		"count": len(tasks),
 	})
 }
 
@@ -315,6 +364,27 @@ func (s *NodeServer) handleGetCapacity(c *gin.Context) {
 func (s *NodeServer) handleGetQueueStats(c *gin.Context) {
 	stats := s.queue.GetStats()
 	c.JSON(http.StatusOK, stats)
+}
+
+func (s *NodeServer) handleGossip(c *gin.Context) {
+	var message map[string]interface{}
+	if err := c.ShouldBindJSON(&message); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid gossip message"})
+		return
+	}
+	
+	// Handle the gossip message
+	s.gossipMgr.HandleGossipMessage(message)
+	
+	c.JSON(http.StatusOK, gin.H{"status": "received"})
+}
+
+func (s *NodeServer) handleGetPeers(c *gin.Context) {
+	peers := s.gossipMgr.GetPeers()
+	c.JSON(http.StatusOK, gin.H{
+		"peers": peers,
+		"count": len(peers),
+	})
 }
 
 func (s *NodeServer) handleHealth(c *gin.Context) {
